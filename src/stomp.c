@@ -1,5 +1,6 @@
 /*
  * Copyright 2013 Evgeni Dobrev <evgeni_dobrev@developer.bg>
+ * Copyright (c) 2015, CUJO LLC.
  *
  * This library is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Lesser General Public License as published by
@@ -17,6 +18,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netdb.h>
+#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -25,9 +27,34 @@
 #include <limits.h>
 #include <time.h>
 
-#include "stomp.h"
+#include <libwebsockets.h>
+
 #include "frame.h"
 #include "hdr.h"
+#include "stomp.h"
+
+#ifdef __MACH__
+#include <mach/clock.h>
+#include <mach/mach.h>
+
+/* XXX: Mac OS X does not support clock_gettime */
+void clock_gettime_mach(struct timespec *now)
+{
+	clock_serv_t cclock;
+	mach_timespec_t mts;
+	host_get_clock_service(mach_host_self(), CALENDAR_CLOCK, &cclock);
+	clock_get_time(cclock, &mts);
+	mach_port_deallocate(mach_task_self(), cclock);
+	now->tv_sec = mts.tv_sec;
+	now->tv_nsec = mts.tv_nsec;
+}
+
+#define CLOCK_GETTIME(now) clock_gettime_mach(now);
+
+#else
+#define CLOCK_GETTIME(now) clock_gettime(CLOCK_MONOTONIC, now);
+#endif
+
 
 /* enough space for ULLONG_MAX as string */
 #define MAXBUFLEN 25
@@ -35,12 +62,7 @@
 /* max number of broker heartbeat timeouts */
 #define MAXBROKERTMOUTS 5
 
-
-enum stomp_prot {
-	SPL_10,
-	SPL_11,
-	SPL_12
-};
+/* XXX */
 
 struct stomp_callbacks {
 	void(*connected)(stomp_session_t *s, void *callback_ctx, void *session_ctx);
@@ -58,13 +80,13 @@ struct _stomp_session {
 	frame_t *frame_in; /* broker -> library */
 
 	enum stomp_prot protocol;
-	int broker_fd;
+	struct libwebsocket* broker_fd; /* XXX: pointer to a WS instance */
 	int client_id; /* unique ids for subscribe */
 	unsigned long client_hb; /* client heart beat period in milliseconds */
 	unsigned long broker_hb; /* broker heart beat period in milliseconds */
 	struct timespec last_write;
 	struct timespec last_read;
-	int broker_timeouts; 
+	int broker_timeouts;
 	int run;
 };
 
@@ -109,7 +131,7 @@ static int parse_heartbeat(const char *s, unsigned long *x, unsigned long *y)
 		return -1;
 	}
 
-	if (tmp_x < 0) {
+	if (tmp_x == ULONG_MAX) {
 		errno = EINVAL;
 		return -1;
 	}
@@ -134,7 +156,7 @@ static int parse_heartbeat(const char *s, unsigned long *x, unsigned long *y)
 		return -1;
 	}
 	
-	if (tmp_y < 0) {
+	if (tmp_y == ULONG_MAX) {
 		errno = EINVAL;
 		return -1;
 	}
@@ -158,7 +180,7 @@ stomp_session_t *stomp_session_new(void *session_ctx)
 	}
 
 	s->ctx = session_ctx;
-	s->broker_fd = -1;
+	s->broker_fd = NULL;
 
 	s->frame_out = frame_new();
 	if (!s->frame_out) {
@@ -234,12 +256,9 @@ void stomp_callback_del(stomp_session_t *s, enum stomp_cb_type type)
 }
 
 
-int stomp_connect(stomp_session_t *s, const char *host, const char *service, size_t hdrc, const struct stomp_hdr *hdrs)
+int stomp_connect(stomp_session_t *s, struct libwebsocket* wsi, size_t hdrc, const struct stomp_hdr *hdrs)
 {
-	struct addrinfo hints;
-	struct addrinfo *result, *rp;
-	int sfd;
-	int err;
+	
 	unsigned long x = 0;
 	unsigned long y = 0;
 	const char *hb = hdr_get(hdrc, hdrs, "heart-beat");
@@ -249,37 +268,8 @@ int stomp_connect(stomp_session_t *s, const char *host, const char *service, siz
 		return -1;
 	}
 	
-	memset(&hints, 0, sizeof(struct addrinfo));
-	hints.ai_family = AF_UNSPEC;
-	hints.ai_socktype = SOCK_STREAM;
-	hints.ai_flags = 0;
-	hints.ai_protocol = 0;
 
-	err = getaddrinfo(host, service, &hints, &result);
-	if (err != 0) {
-		return -1;
-	}
-
-	for (rp = result; rp != NULL; rp = rp->ai_next) {
-		sfd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
-		if (sfd == -1)
-			continue;
-
-		if (connect(sfd, rp->ai_addr, rp->ai_addrlen) != -1)
-			break; 
-
-		close(sfd);
-	}
-
-
-	if (rp == NULL) { 
-		freeaddrinfo(result);
-		return -1;
-	}
-	
-	freeaddrinfo(result);
-
-	s->broker_fd = sfd;
+	s->broker_fd = wsi;
 	s->run = 1;
 	
 	frame_reset(s->frame_out);
@@ -295,12 +285,12 @@ int stomp_connect(stomp_session_t *s, const char *host, const char *service, siz
 		return -1;
 	}
 
-	if (frame_write(sfd, s->frame_out) < 0) {
+	if (frame_write(wsi, s->frame_out) < 0) {
 		s->run = 0;
 		return -1;
 	}
 
-	clock_gettime(CLOCK_MONOTONIC, &s->last_write);
+	CLOCK_GETTIME(&s->last_write);
 
 	return 0;
 }
@@ -322,7 +312,7 @@ int stomp_disconnect(stomp_session_t *s, size_t hdrc, const struct stomp_hdr *hd
 		return -1;
 	}
 	
-	clock_gettime(CLOCK_MONOTONIC, &s->last_write);
+	CLOCK_GETTIME(&s->last_write);
 	
 	return 0;
 }
@@ -377,7 +367,7 @@ int stomp_subscribe(stomp_session_t *s, size_t hdrc, const struct stomp_hdr *hdr
 		return -1;
 	}
 
-	clock_gettime(CLOCK_MONOTONIC, &s->last_write);
+	CLOCK_GETTIME(&s->last_write);
 	s->client_id = client_id;
 
 	return client_id;
@@ -424,7 +414,7 @@ int stomp_unsubscribe(stomp_session_t *s, int client_id, size_t hdrc, const stru
 		return -1;
 	}
 	
-	clock_gettime(CLOCK_MONOTONIC, &s->last_write);
+	CLOCK_GETTIME(&s->last_write);
 
 	return 0;
 }
@@ -452,7 +442,7 @@ int stomp_begin(stomp_session_t *s, size_t hdrc, const struct stomp_hdr *hdrs)
 		return -1;
 	}
 	
-	clock_gettime(CLOCK_MONOTONIC, &s->last_write);
+	CLOCK_GETTIME(&s->last_write);
 
 	return 0;
 }
@@ -479,7 +469,7 @@ int stomp_abort(stomp_session_t *s, size_t hdrc, const struct stomp_hdr *hdrs)
 		return -1;
 	}
 	
-	clock_gettime(CLOCK_MONOTONIC, &s->last_write);
+	CLOCK_GETTIME(&s->last_write);
 
 	return 0;
 }
@@ -526,7 +516,7 @@ int stomp_ack(stomp_session_t *s, size_t hdrc, const struct stomp_hdr *hdrs)
 		return -1;
 	}
 	
-	clock_gettime(CLOCK_MONOTONIC, &s->last_write);
+	CLOCK_GETTIME(&s->last_write);
 
 	return 0;
 }
@@ -570,7 +560,7 @@ int stomp_nack(stomp_session_t *s, size_t hdrc, const struct stomp_hdr *hdrs)
 		return -1;
 	}
 	
-	clock_gettime(CLOCK_MONOTONIC, &s->last_write);
+	CLOCK_GETTIME(&s->last_write);
 
 	return 0;
 }
@@ -597,7 +587,7 @@ int stomp_commit(stomp_session_t *s, size_t hdrc, const struct stomp_hdr *hdrs)
 		return -1;
 	}
 	
-	clock_gettime(CLOCK_MONOTONIC, &s->last_write);
+	CLOCK_GETTIME(&s->last_write);
 
 	return 0;
 }
@@ -634,13 +624,13 @@ int stomp_send(stomp_session_t *s, size_t hdrc, const struct stomp_hdr *hdrs, vo
 	if (frame_body_set(s->frame_out, body, body_len)) {
 		return -1;
 	}
-	
+
 	if (frame_write(s->broker_fd, s->frame_out) < 0) {
 		s->run = 0;
 		return -1;
 	}
 	
-	clock_gettime(CLOCK_MONOTONIC, &s->last_write);
+	CLOCK_GETTIME(&s->last_write);
 
 	return 0;
 }
@@ -733,7 +723,7 @@ static void on_message(stomp_session_t *s)
 	s->callbacks.message(s, &e, s->ctx);
 }
 
-static int on_server_cmd(stomp_session_t *s)
+int on_server_cmd(stomp_session_t *s, const unsigned char* buf, size_t len)
 {
 	int err;
 	const char *cmd;
@@ -742,7 +732,7 @@ static int on_server_cmd(stomp_session_t *s)
 
 	frame_reset(f);
 
-	err = frame_read(s->broker_fd, f);
+	err = frame_read(buf, len, f);
 	if (err) {
 		return -1;
 	}
@@ -768,12 +758,13 @@ static int on_server_cmd(stomp_session_t *s)
 	return 0;
 }
 
+/*
 int stomp_run(stomp_session_t *s)
 {
 	fd_set rd;
 	int r;
 	struct timeval tv;
-	unsigned long t; /* select timeout in milliseconds */
+	unsigned long t; 
 	struct timespec now;
 	unsigned long elapsed;
 
@@ -848,5 +839,56 @@ stomp_run_error:
 
 	(void)close(s->broker_fd);
 	return -1;
+}
+*/
+
+/* XXX: probably worth re-organizing */
+#define HB_BUF_SZ	(LWS_SEND_BUFFER_PRE_PADDING +	\
+			 1 +				\
+			 LWS_SEND_BUFFER_POST_PADDING)
+
+unsigned char hb_buf[HB_BUF_SZ] = { [LWS_SEND_BUFFER_PRE_PADDING] = '\n' };
+
+int stomp_handle_heartbeat(stomp_session_t *s, unsigned long t)
+{
+	struct timeval tv;
+	struct timespec now;
+	unsigned long elapsed;
+
+	tv.tv_sec = t / 1000;
+	tv.tv_usec = (t % 1000) * 1000;
+
+	if (s->callbacks.user) {
+		s->callbacks.user(s, NULL, s->ctx);
+	}
+
+	if (s->client_hb || s->broker_hb) {
+		CLOCK_GETTIME(&now);
+	}
+	
+	if (s->broker_hb) {
+		elapsed = (now.tv_sec - s->last_read.tv_sec) * 1000 + \
+			  (now.tv_nsec - s->last_read.tv_nsec) / 1000000;
+
+		if (elapsed > s->broker_hb) {
+			memcpy(&s->last_read, &now, sizeof(s->last_write));
+			s->broker_timeouts++;
+		}
+
+		assert(s->broker_timeouts <= MAXBROKERTMOUTS);
+	}
+	
+	if (s->client_hb) {
+		elapsed = (now.tv_sec - s->last_write.tv_sec) * 1000 + \
+			  (now.tv_nsec - s->last_write.tv_nsec) / 1000000;
+
+		if (elapsed > s->client_hb) {
+			memcpy(&s->last_write, &now, sizeof(s->last_write));
+			assert(libwebsocket_write(s->broker_fd, &hb_buf[LWS_SEND_BUFFER_PRE_PADDING], 1, LWS_WRITE_TEXT) != -1);
+		}
+	}
+
+	return 0;
+
 }
 

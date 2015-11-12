@@ -1,5 +1,6 @@
 /*
  * Copyright 2013 Evgeni Dobrev <evgeni_dobrev@developer.bg>
+ * Copyright (c) 2015, CUJO LLC.
  *
  * This library is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Lesser General Public License as published by
@@ -19,6 +20,8 @@
 #include <string.h>
 #include <errno.h>
 #include <unistd.h>
+
+#include <libwebsockets.h>
 
 #include "frame.h"
 #include "hdr.h"
@@ -100,7 +103,6 @@ static int parse_content_length(const char *s, size_t *len)
 	return 0;
 }
 
-
 frame_t *frame_new()
 {
 	frame_t *f = calloc(1, sizeof(*f));
@@ -166,7 +168,9 @@ static void *frame_alloc(frame_t *f, size_t len)
 		return f->buf + f->buf_len;
 	}
 
-	capacity = f->buf_capacity + BUFINCLEN;
+	capacity = f->buf_capacity + \
+		(BUFINCLEN > len ? BUFINCLEN : len);
+
 	buf = realloc(f->buf, capacity);
 	if (!buf) {
 		return NULL;
@@ -489,11 +493,11 @@ static enum read_state frame_read_body(frame_t *f, char c)
 	return state;
 } 
 
-ssize_t frame_write(int fd, frame_t *f) 
+
+ssize_t frame_write(struct libwebsocket* wsi, frame_t *f) 
 {
 	size_t left; 
-	ssize_t n;
-	ssize_t total = 0;
+	size_t n;
 
 	/* close the frame */
 	if (!f->body_offset) {
@@ -503,17 +507,23 @@ ssize_t frame_write(int fd, frame_t *f)
 	}
 
 	left = f->buf_len; 
-	while(total < f->buf_len) {
-		n = write(fd, f->buf+total, left);
-		if (n == -1) {
-			return -1;
-		}
 
-		total += n;
-		left -= n;
-	}
+	unsigned char *ws_buf =  calloc(1, LWS_SEND_BUFFER_PRE_PADDING +
+				left + LWS_SEND_BUFFER_POST_PADDING + 1);
 
-	return total; 
+	if (!ws_buf)
+		return -1;
+			
+	memcpy(ws_buf + LWS_SEND_BUFFER_PRE_PADDING, f->buf, left);
+
+	n = libwebsocket_write(wsi, &ws_buf[LWS_SEND_BUFFER_PRE_PADDING], left, LWS_WRITE_TEXT);
+
+	/* assert(n == left); */
+	/* printf("stomp (frame_write): %zu bytes written\n", n); */
+
+	free(ws_buf);
+
+	return n; 
 }
 
 static enum read_state frame_read_init(frame_t *f, char c) 
@@ -683,15 +693,15 @@ static enum read_state frame_read_hdr_esc(frame_t *f, char c)
 	return RS_HDR;
 } 
 
-int frame_read(int fd, frame_t *f)
+int frame_read(const unsigned char* ptr, size_t len, frame_t *f)
 {
-	char c = 0;
-	
-	while (f->read_state != RS_ERR && f->read_state != RS_DONE) {
+	unsigned char c = 0;
 
-		if(read(fd, &c, sizeof(char)) != sizeof(char)) {
-			return -1;
-		}
+	size_t pos = 0;
+	
+	while (pos < len && f->read_state != RS_ERR && f->read_state != RS_DONE) {
+		
+		c = *(ptr+(pos++));
 
 		switch(f->read_state) {
 			case RS_INIT:

@@ -1,5 +1,6 @@
 /*
  * Copyright 2013 Evgeni Dobrev <evgeni_dobrev@developer.bg>
+ * Copyright (c) 2015, CUJO LLC.
  *
  * This library is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Lesser General Public License as published by
@@ -18,6 +19,7 @@
 #define STOMP_H
 
 #include <sys/types.h>
+#include <libwebsockets.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -161,7 +163,7 @@ void stomp_session_free(stomp_session_t *s);
  *
  * @return 0 on success; negative on error and errno is set appropriately.
  */
-int stomp_connect(stomp_session_t *s, const char *host, const char *service, size_t hdrc, const struct stomp_hdr *hdrs);
+/* int stomp_connect(stomp_session_t *s, const char *host, const char *service, size_t hdrc, const struct stomp_hdr *hdrs); */
 
 /**
  * Disconnect from a STOMP broker.
@@ -309,7 +311,18 @@ int stomp_send(stomp_session_t *s, size_t hdrc, const struct stomp_hdr *hdrs, vo
  *
  * @return 0 on success; negative on error and errno is set appropriately
  */
-int stomp_run(stomp_session_t *s);
+
+enum stomp_prot {
+	SPL_10,
+	SPL_11,
+	SPL_12
+};
+
+int on_server_cmd(stomp_session_t *s, const unsigned char* buf, size_t len);
+
+int stomp_connect(stomp_session_t *s, struct libwebsocket* wsi, size_t hdrc, const struct stomp_hdr *hdrs);
+
+int stomp_handle_heartbeat(stomp_session_t *s, unsigned long t);
 
 #ifdef __cplusplus
 }

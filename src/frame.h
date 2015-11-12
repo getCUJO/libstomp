@@ -1,5 +1,6 @@
 /*
  * Copyright 2013 Evgeni Dobrev <evgeni_dobrev@developer.bg>
+ * Copyright (c) 2015, CUJO LLC.
  *
  * This library is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Lesser General Public License as published by
@@ -14,8 +15,8 @@
  * You should have received a copy of the GNU Lesser General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
-#ifndef FRAME_H
-#define FRAME_H
+#ifndef STOMP_FRAME_H
+#define STOMP_FRAME_H
 
 #include "stomp.h"
 
@@ -28,11 +29,11 @@ int frame_cmd_set(frame_t *f, const char *cmd);
 int frame_hdr_add(frame_t *f, const char *key, const char *val);
 int frame_hdrs_add(frame_t *f, size_t hdrc, const struct stomp_hdr *hdrs);
 int frame_body_set(frame_t *f, const void *body, size_t len);
-ssize_t frame_write(int fd, frame_t *f);
+ssize_t frame_write(struct libwebsocket* fd, frame_t *f);
 
 size_t frame_cmd_get(frame_t *f, const char **cmd);
 size_t frame_hdrs_get(frame_t *f, const struct stomp_hdr **hdrs);
 size_t frame_body_get(frame_t *f, const void **body);
-int frame_read(int fd, frame_t *f);
+int frame_read(const unsigned char* buf, size_t len, frame_t *f);
 
-#endif /* FRAME_H */
+#endif
