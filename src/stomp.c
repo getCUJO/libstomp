@@ -842,53 +842,50 @@ stomp_run_error:
 }
 */
 
-/* XXX: probably worth re-organizing */
-#define HB_BUF_SZ	(LWS_SEND_BUFFER_PRE_PADDING +	\
-			 1 +				\
-			 LWS_SEND_BUFFER_POST_PADDING)
-
-unsigned char hb_buf[HB_BUF_SZ] = { [LWS_SEND_BUFFER_PRE_PADDING] = '\n' };
-
-int stomp_handle_heartbeat(stomp_session_t *s, unsigned long t)
+int
+stomp_handle_heartbeat(stomp_session_t *s, unsigned long t)
 {
-	struct timeval tv;
-	struct timespec now;
-	unsigned long elapsed;
+	struct timeval	 tv;
+	struct timespec	 now;
+	unsigned long	 elapsed;
+	unsigned char	*buf;
 
 	tv.tv_sec = t / 1000;
 	tv.tv_usec = (t % 1000) * 1000;
 
-	if (s->callbacks.user) {
+	if (s->callbacks.user)
 		s->callbacks.user(s, NULL, s->ctx);
-	}
 
-	if (s->client_hb || s->broker_hb) {
+	if (s->client_hb || s->broker_hb)
 		CLOCK_GETTIME(&now);
-	}
-	
-	if (s->broker_hb) {
-		elapsed = (now.tv_sec - s->last_read.tv_sec) * 1000 + \
-			  (now.tv_nsec - s->last_read.tv_nsec) / 1000000;
 
+	if (s->broker_hb) {
+		elapsed = (now.tv_sec - s->last_read.tv_sec) * 1000 +
+		    (now.tv_nsec - s->last_read.tv_nsec) / 1000000;
 		if (elapsed > s->broker_hb) {
-			memcpy(&s->last_read, &now, sizeof(s->last_write));
+			memcpy(&s->last_read, &now, sizeof(s->last_read));
 			s->broker_timeouts++;
 		}
-
+		/* XXX assert inside a library? */
 		assert(s->broker_timeouts <= MAXBROKERTMOUTS);
 	}
-	
+
 	if (s->client_hb) {
 		elapsed = (now.tv_sec - s->last_write.tv_sec) * 1000 + \
-			  (now.tv_nsec - s->last_write.tv_nsec) / 1000000;
-
+		    (now.tv_nsec - s->last_write.tv_nsec) / 1000000;
 		if (elapsed > s->client_hb) {
 			memcpy(&s->last_write, &now, sizeof(s->last_write));
-			assert(libwebsocket_write(s->broker_fd, &hb_buf[LWS_SEND_BUFFER_PRE_PADDING], 1, LWS_WRITE_TEXT) != -1);
+			if ((buf = calloc(1, LWS_SEND_BUFFER_PRE_PADDING + 1 +
+			    LWS_SEND_BUFFER_POST_PADDING + 1)) == NULL)
+				return (-1);
+			buf[LWS_SEND_BUFFER_PRE_PADDING] = '\n';
+			/* XXX assert inside a library? */
+			assert(libwebsocket_write(s->broker_fd,
+			    &buf[LWS_SEND_BUFFER_PRE_PADDING], 1,
+			    LWS_WRITE_TEXT) != -1);
+			free(buf);
 		}
 	}
 
-	return 0;
-
+	return (0);
 }
-
