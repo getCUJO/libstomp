@@ -736,12 +736,14 @@ int on_server_cmd(stomp_session_t *s, const unsigned char* buf, size_t len)
 	if (err) {
 		return -1;
 	}
-	
+
+	CLOCK_GETTIME(&s->last_read);
+	s->broker_timeouts = 0;
+
 	cmd_len = frame_cmd_get(f, &cmd);
 	/* heart-beat */
-	if (!cmd_len) {
+	if (cmd_len == 0)
 		return 0;
-	}
 
 	if (!strncmp(cmd, "CONNECTED", cmd_len)) {
 		on_connected(s);
