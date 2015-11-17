@@ -92,7 +92,7 @@ struct stomp_ctx_message {
  *
  * Aside from the server responses the client
  * can also register for a user callback (SCB_USER). The callback
- * will be called within every itteration of stomp_run(). 
+ * will be called within every iteration of stomp_handle_heartbeat().
  * The amount of time between the calls is set to 1 second when no 
  * heart-beat header is provided. Otherwise it wil get called 
  * with the smallest timeneeded to satisfy the requuired heart-beats.
@@ -152,8 +152,6 @@ void stomp_session_free(stomp_session_t *s);
  * Connect to a STOMP broker.
  *
  * Headers parameter MUST contain the headers required by the specification.
- * Note that in order to get notified of the server responses you must
- * register the appropriate handler and call stomp_run()
  *
  * @param s Pointer to a session handle.
  * @param host Hostname to connect to.
