@@ -843,15 +843,11 @@ stomp_run_error:
 */
 
 int
-stomp_handle_heartbeat(stomp_session_t *s, unsigned long t)
+stomp_handle_heartbeat(stomp_session_t *s)
 {
-	struct timeval	 tv;
 	struct timespec	 now;
 	unsigned long	 elapsed;
 	unsigned char	*buf;
-
-	tv.tv_sec = t / 1000;
-	tv.tv_usec = (t % 1000) * 1000;
 
 	if (s->callbacks.user)
 		s->callbacks.user(s, NULL, s->ctx);

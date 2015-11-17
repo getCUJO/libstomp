@@ -322,7 +322,7 @@ int on_server_cmd(stomp_session_t *s, const unsigned char* buf, size_t len);
 
 int stomp_connect(stomp_session_t *s, struct libwebsocket* wsi, size_t hdrc, const struct stomp_hdr *hdrs);
 
-int stomp_handle_heartbeat(stomp_session_t *s, unsigned long t);
+int stomp_handle_heartbeat(stomp_session_t *s);
 
 #ifdef __cplusplus
 }
