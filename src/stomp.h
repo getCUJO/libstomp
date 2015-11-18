@@ -95,7 +95,7 @@ int stomp_commit(stomp_session_t *, size_t, const struct stomp_hdr *);
 int stomp_send(stomp_session_t *, size_t, const struct stomp_hdr *, void *,
     size_t);
 
-int on_server_cmd(stomp_session_t *, const unsigned char*, size_t);
+int stomp_recv_cmd(stomp_session_t *, const unsigned char*, size_t);
 
 int stomp_connect(stomp_session_t *, struct libwebsocket *,size_t,
     const struct stomp_hdr *);

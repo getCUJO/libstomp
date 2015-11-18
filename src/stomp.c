@@ -575,7 +575,7 @@ stomp_send(stomp_session_t *s, size_t hdrc, const struct stomp_hdr *hdrs,
 }
 
 int
-on_server_cmd(stomp_session_t *s, const unsigned char* buf, size_t len)
+stomp_recv_cmd(stomp_session_t *s, const unsigned char* buf, size_t len)
 {
 	int err;
 	const char *cmd;
