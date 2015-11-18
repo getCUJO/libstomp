@@ -70,8 +70,6 @@ typedef void(*stomp_cb_t)(stomp_session_t *, void *, void *);
 
 void stomp_callback_set(stomp_session_t *, enum stomp_cb_type, stomp_cb_t);
 
-void stomp_callback_del(stomp_session_t *, enum stomp_cb_type);
-
 stomp_session_t *stomp_session_new(void *);
 
 void stomp_session_free(stomp_session_t *);

@@ -155,33 +155,6 @@ stomp_callback_set(stomp_session_t *s, enum stomp_cb_type type, stomp_cb_t cb)
 	}
 }
 
-void
-stomp_callback_del(stomp_session_t *s, enum stomp_cb_type type)
-{
-	if (!s) {
-		return;
-	}
-
-	switch (type) {
-		case SCB_CONNECTED:
-			s->callbacks.connected = NULL;
-			break;
-		case SCB_ERROR:
-			s->callbacks.error = NULL;
-			break;
-		case SCB_MESSAGE:
-			s->callbacks.message = NULL;
-			break;
-		case SCB_RECEIPT:
-			s->callbacks.receipt = NULL;
-			break;
-		case SCB_USER:
-			s->callbacks.user = NULL;
-		default:
-			return;
-	}
-}
-
 int
 stomp_connect(stomp_session_t *s, struct libwebsocket* wsi, size_t hdrc,
     const struct stomp_hdr *hdrs)
