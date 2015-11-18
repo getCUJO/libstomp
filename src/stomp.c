@@ -35,10 +35,10 @@
 #include "stomp.h"
 
 /* enough space for ULLONG_MAX as string */
-#define MAXBUFLEN 25
+#define ULL_STR_LEN 25
 
 /* max number of broker heartbeat timeouts */
-#define MAXBROKERTMOUTS 5
+#define MAX_BROKER_TIMEOUTS 5
 
 struct stomp_callbacks {
 	void (*connected)(stomp_session_t *, void *, void *);
@@ -195,7 +195,7 @@ int
 stomp_subscribe(stomp_session_t *s, size_t hdrc, const struct stomp_hdr *hdrs)
 {
 	int		 client_id = 0;
-	char		 buf[MAXBUFLEN];
+	char		 buf[ULL_STR_LEN];
 	const char	*ack;
 
 	if (hdr_get(hdrc, hdrs, "destination") == NULL) {
@@ -221,7 +221,7 @@ stomp_subscribe(stomp_session_t *s, size_t hdrc, const struct stomp_hdr *hdrs)
 		if (client_id == INT_MAX)
 			client_id = 0;
 		client_id++;
-		snprintf(buf, MAXBUFLEN, "%d", client_id);
+		snprintf(buf, ULL_STR_LEN, "%d", client_id);
 		if (frame_hdr_add(s->frame_out, "id", buf))
 			return (-1);
 	}
@@ -245,7 +245,7 @@ int
 stomp_unsubscribe(stomp_session_t *s, int client_id, size_t hdrc,
     const struct stomp_hdr *hdrs)
 {
-	char		 buf[MAXBUFLEN];
+	char		 buf[ULL_STR_LEN];
 	const char	*id, *destination;
 
 	id = hdr_get(hdrc, hdrs, "id");
@@ -268,7 +268,7 @@ stomp_unsubscribe(stomp_session_t *s, int client_id, size_t hdrc,
 
 	/* user provided client id. overrride all other supplied headers */
 	if (client_id) {
-		snprintf(buf, MAXBUFLEN, "%lu", (unsigned long)client_id);
+		snprintf(buf, ULL_STR_LEN, "%lu", (unsigned long)client_id);
 		if (frame_hdr_add(s->frame_out, "id", buf))
 			return (-1);
 	}
@@ -445,7 +445,7 @@ int
 stomp_send(stomp_session_t *s, size_t hdrc, const struct stomp_hdr *hdrs,
     void *body, size_t body_len)
 {
-	char		 buf[MAXBUFLEN];
+	char		 buf[ULL_STR_LEN];
 	const char	*len;
 
 	if (hdr_get(hdrc, hdrs, "destination") == NULL) {
@@ -461,7 +461,7 @@ stomp_send(stomp_session_t *s, size_t hdrc, const struct stomp_hdr *hdrs,
 	/* frames SHOULD include a content-length */
 	len = hdr_get(hdrc, hdrs, "content-length");
 	if (len == 0) {
-		snprintf(buf, MAXBUFLEN, "%lu", (unsigned long)body_len);
+		snprintf(buf, ULL_STR_LEN, "%lu", (unsigned long)body_len);
 		if (frame_hdr_add(s->frame_out, "content-length", buf))
 			return (-1);
 	}
@@ -535,7 +535,7 @@ stomp_handle_heartbeat(stomp_session_t *s)
 			s->broker_timeouts++;
 		}
 		/* XXX assert inside a library? */
-		assert(s->broker_timeouts <= MAXBROKERTMOUTS);
+		assert(s->broker_timeouts <= MAX_BROKER_TIMEOUTS);
 	}
 
 	if (s->client_hb != 0) {
