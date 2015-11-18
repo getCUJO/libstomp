@@ -17,15 +17,16 @@
  */
 #include <sys/types.h>
 #include <sys/socket.h>
+
+#include <errno.h>
+#include <limits.h>
 #include <netdb.h>
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <unistd.h>
 #include <string.h>
-#include <errno.h>
-#include <limits.h>
 #include <time.h>
+#include <unistd.h>
 
 #include <libwebsockets.h>
 
@@ -62,117 +63,39 @@ void clock_gettime_mach(struct timespec *now)
 /* max number of broker heartbeat timeouts */
 #define MAXBROKERTMOUTS 5
 
-/* XXX */
-
 struct stomp_callbacks {
-	void(*connected)(stomp_session_t *s, void *callback_ctx, void *session_ctx);
-	void(*message)(stomp_session_t *s, void *callback_ctx, void *session_ctx);
-	void(*error)(stomp_session_t *s, void *callback_ctx, void *session_ctx);
-	void(*receipt)(stomp_session_t *s, void *callback_ctx, void *session_ctx);
-	void(*user)(stomp_session_t *s, void *callback_ctx, void *session_ctx);
+	void (*connected)(stomp_session_t *, void *, void *);
+	void (*message)(stomp_session_t *, void *, void *);
+	void (*error)(stomp_session_t *, void *, void *);
+	void (*receipt)(stomp_session_t *, void *, void *);
+	void (*user)(stomp_session_t *, void *, void *);
 };
 
 struct _stomp_session {
-	struct stomp_callbacks callbacks; /* event callbacks */
-	void *ctx; /* pointer to user supplied session context */
-
-	frame_t *frame_out; /* library -> broker */
-	frame_t *frame_in; /* broker -> library */
-
-	enum stomp_prot protocol;
-	struct libwebsocket* broker_fd; /* XXX: pointer to a WS instance */
-	int client_id; /* unique ids for subscribe */
-	unsigned long client_hb; /* client heart beat period in milliseconds */
-	unsigned long broker_hb; /* broker heart beat period in milliseconds */
-	struct timespec last_write;
-	struct timespec last_read;
-	int broker_timeouts;
-	int run;
+	struct stomp_callbacks	 callbacks;	/* event callbacks */
+	void			*ctx;		/* ptr to session context */
+	frame_t			*frame_out;	/* library -> broker */
+	frame_t			*frame_in;	/* broker -> library */
+	enum stomp_prot		 protocol;
+	struct libwebsocket	*broker_fd;	/* pointer to a WS instance */
+	int			 client_id;	/* unique ids for subscribe */
+	unsigned long		 client_hb;	/* client heartbeat [ms] */
+	unsigned long		 broker_hb;	/* broker heartbeat [ms] */
+	struct timespec		 last_write;
+	struct timespec		 last_read;
+	int			 broker_timeouts;
+	int			 run;
 };
 
-static int parse_version(const char *s, enum stomp_prot *v)
-{
-	enum stomp_prot tmp_v;
+static int parse_version(const char *, enum stomp_prot *);
+static int parse_heartbeat(const char *, unsigned long *, unsigned long *);
+static void on_connected(stomp_session_t *);
+static void on_receipt(stomp_session_t *);
+static void on_error(stomp_session_t *);
+static void on_message(stomp_session_t *);
 
-	if (!s) {
-		errno = EINVAL;
-		return -1;
-	}
-
-	if (!strncmp(s, "1.2", 3)) {
-		tmp_v = SPL_12;
-	} else if (!strncmp(s, "1.1", 3)) {
-		tmp_v = SPL_11;
-	} else if (!strncmp(s, "1.0", 3)) {
-		tmp_v = SPL_10;
-	} else {
-		tmp_v = SPL_10;
-	}
-	
-	*v = tmp_v;
-
-	return 0;
-}
-static int parse_heartbeat(const char *s, unsigned long *x, unsigned long *y)
-{
-	unsigned long tmp_x, tmp_y;
-	char *endptr;
-	const char *nptr = s;
-
-	if (!s) {
-		errno = EINVAL;
-		return -1;
-	}
-
-	errno = 0;
-	tmp_x = strtoul(nptr, &endptr, 10);
-	if (errno != 0) {
-		errno = EINVAL;
-		return -1;
-	}
-
-	if (tmp_x == ULONG_MAX) {
-		errno = EINVAL;
-		return -1;
-	}
-
-	if (endptr == nptr) {
-		errno = EINVAL;
-		return -1;
-	}
-
-	if (*endptr != ',') {
-		errno = EINVAL;
-		return -1;
-	}
-	
-	nptr = endptr;
-	nptr++;
-
-	errno = 0;
-	tmp_y = strtoul(nptr, &endptr, 10);
-	if (errno !=0) {
-		errno = EINVAL;
-		return -1;
-	}
-	
-	if (tmp_y == ULONG_MAX) {
-		errno = EINVAL;
-		return -1;
-	}
-
-	if (endptr == nptr) {
-		errno = EINVAL;
-		return -1;
-	}
-	
-	*x = tmp_x;
-	*y = tmp_y;
-
-	return 0;
-}
-
-stomp_session_t *stomp_session_new(void *session_ctx)
+stomp_session_t *
+stomp_session_new(void *session_ctx)
 {
 	stomp_session_t *s = calloc(1, sizeof(*s));
 	if (!s) {
@@ -196,14 +119,16 @@ stomp_session_t *stomp_session_new(void *session_ctx)
 	return s;
 }
 
-void stomp_session_free(stomp_session_t *s)
+void
+stomp_session_free(stomp_session_t *s)
 {
 	frame_free(s->frame_out);
 	frame_free(s->frame_in);
 	free(s);
 }
 
-void stomp_callback_set(stomp_session_t *s, enum stomp_cb_type type, stomp_cb_t cb)
+void
+stomp_callback_set(stomp_session_t *s, enum stomp_cb_type type, stomp_cb_t cb)
 {
 	if (!s) {
 		return;
@@ -229,7 +154,8 @@ void stomp_callback_set(stomp_session_t *s, enum stomp_cb_type type, stomp_cb_t 
 	}
 }
 
-void stomp_callback_del(stomp_session_t *s, enum stomp_cb_type type)
+void
+stomp_callback_del(stomp_session_t *s, enum stomp_cb_type type)
 {
 	if (!s) {
 		return;
@@ -255,10 +181,11 @@ void stomp_callback_del(stomp_session_t *s, enum stomp_cb_type type)
 	}
 }
 
-
-int stomp_connect(stomp_session_t *s, struct libwebsocket* wsi, size_t hdrc, const struct stomp_hdr *hdrs)
+int
+stomp_connect(stomp_session_t *s, struct libwebsocket* wsi, size_t hdrc,
+    const struct stomp_hdr *hdrs)
 {
-	
+
 	unsigned long x = 0;
 	unsigned long y = 0;
 	const char *hb = hdr_get(hdrc, hdrs, "heart-beat");
@@ -267,20 +194,20 @@ int stomp_connect(stomp_session_t *s, struct libwebsocket* wsi, size_t hdrc, con
 		errno = EINVAL;
 		return -1;
 	}
-	
+
 
 	s->broker_fd = wsi;
 	s->run = 1;
-	
+
 	frame_reset(s->frame_out);
 
 	if (frame_cmd_set(s->frame_out, "CONNECT")) {
 		return -1;
 	}
-	
+
 	s->client_hb = x;
 	s->broker_hb = y;
-	
+
 	if (frame_hdrs_add(s->frame_out, hdrc, hdrs)) {
 		return -1;
 	}
@@ -295,7 +222,8 @@ int stomp_connect(stomp_session_t *s, struct libwebsocket* wsi, size_t hdrc, con
 	return 0;
 }
 
-int stomp_disconnect(stomp_session_t *s, size_t hdrc, const struct stomp_hdr *hdrs)
+int
+stomp_disconnect(stomp_session_t *s, size_t hdrc, const struct stomp_hdr *hdrs)
 {
 	frame_reset(s->frame_out);
 
@@ -311,14 +239,15 @@ int stomp_disconnect(stomp_session_t *s, size_t hdrc, const struct stomp_hdr *hd
 		s->run = 0;
 		return -1;
 	}
-	
+
 	CLOCK_GETTIME(&s->last_write);
-	
+
 	return 0;
 }
 
-// TODO enforce different client-ids in case they are provided with hdrs
-int stomp_subscribe(stomp_session_t *s, size_t hdrc, const struct stomp_hdr *hdrs)
+/* TODO enforce different client-ids in case they are provided with hdrs */
+int
+stomp_subscribe(stomp_session_t *s, size_t hdrc, const struct stomp_hdr *hdrs)
 {
 	const char *ack;
 	char buf[MAXBUFLEN];
@@ -328,9 +257,10 @@ int stomp_subscribe(stomp_session_t *s, size_t hdrc, const struct stomp_hdr *hdr
 		errno = EINVAL;
 		return -1;
 	}
-	
+
 	ack = hdr_get(hdrc, hdrs, "ack");
-	if (ack && strcmp(ack, "auto") && strcmp(ack, "client") && strcmp(ack, "client-individual")) {
+	if (ack && strcmp(ack, "auto") && strcmp(ack, "client") &&
+	    strcmp(ack, "client-individual")) {
 		errno = EINVAL;
 		return -1;
 	}
@@ -340,7 +270,7 @@ int stomp_subscribe(stomp_session_t *s, size_t hdrc, const struct stomp_hdr *hdr
 	if (frame_cmd_set(s->frame_out, "SUBSCRIBE")) {
 		return -1;
 	}
-	
+
 	if (!hdr_get(hdrc, hdrs, "id")) {
 		client_id = s->client_id;
 		if (client_id == INT_MAX) {
@@ -351,17 +281,17 @@ int stomp_subscribe(stomp_session_t *s, size_t hdrc, const struct stomp_hdr *hdr
 		if (frame_hdr_add(s->frame_out, "id", buf)) {
 			return -1;
 		}
-	} 
+	}
 
-	
+
 	if (!ack && frame_hdr_add(s->frame_out, "ack", "auto")) {
 		return -1;
 	}
-	
+
 	if (frame_hdrs_add(s->frame_out, hdrc, hdrs)) {
 		return -1;
 	}
-	
+
 	if (frame_write(s->broker_fd, s->frame_out) < 0) {
 		s->run = 0;
 		return -1;
@@ -373,7 +303,9 @@ int stomp_subscribe(stomp_session_t *s, size_t hdrc, const struct stomp_hdr *hdr
 	return client_id;
 }
 
-int stomp_unsubscribe(stomp_session_t *s, int client_id, size_t hdrc, const struct stomp_hdr *hdrs)
+int
+stomp_unsubscribe(stomp_session_t *s, int client_id, size_t hdrc,
+    const struct stomp_hdr *hdrs)
 {
 	char buf[MAXBUFLEN];
 	const char *id = hdr_get(hdrc, hdrs, "id");
@@ -396,15 +328,15 @@ int stomp_unsubscribe(stomp_session_t *s, int client_id, size_t hdrc, const stru
 	if (frame_cmd_set(s->frame_out, "UNSUBSCRIBE")) {
 		return -1;
 	}
-	
-	// user provided client id. overrride all other supplied headers
+
+	/* user provided client id. overrride all other supplied headers */
 	if (client_id) {
 		snprintf(buf, MAXBUFLEN, "%lu", (unsigned long)client_id);
 		if (frame_hdr_add(s->frame_out, "id", buf)) {
 			return -1;
 		}
 	}
-	
+
 	if (frame_hdrs_add(s->frame_out, hdrc, hdrs)) {
 		return -1;
 	}
@@ -413,14 +345,15 @@ int stomp_unsubscribe(stomp_session_t *s, int client_id, size_t hdrc, const stru
 		s->run = 0;
 		return -1;
 	}
-	
+
 	CLOCK_GETTIME(&s->last_write);
 
 	return 0;
 }
 
-// TODO enforce different tx_ids
-int stomp_begin(stomp_session_t *s, size_t hdrc, const struct stomp_hdr *hdrs)
+/* TODO enforce different tx_ids */
+int
+stomp_begin(stomp_session_t *s, size_t hdrc, const struct stomp_hdr *hdrs)
 {
 	if (!hdr_get(hdrc, hdrs, "transaction")) {
 		errno = EINVAL;
@@ -436,18 +369,19 @@ int stomp_begin(stomp_session_t *s, size_t hdrc, const struct stomp_hdr *hdrs)
 	if (frame_hdrs_add(s->frame_out, hdrc, hdrs)) {
 		return -1;
 	}
-	
+
 	if (frame_write(s->broker_fd, s->frame_out) < 0) {
 		s->run = 0;
 		return -1;
 	}
-	
+
 	CLOCK_GETTIME(&s->last_write);
 
 	return 0;
 }
 
-int stomp_abort(stomp_session_t *s, size_t hdrc, const struct stomp_hdr *hdrs)
+int
+stomp_abort(stomp_session_t *s, size_t hdrc, const struct stomp_hdr *hdrs)
 {
 	if (!hdr_get(hdrc, hdrs, "transaction")) {
 		errno = EINVAL;
@@ -468,13 +402,14 @@ int stomp_abort(stomp_session_t *s, size_t hdrc, const struct stomp_hdr *hdrs)
 		s->run = 0;
 		return -1;
 	}
-	
+
 	CLOCK_GETTIME(&s->last_write);
 
 	return 0;
 }
 
-int stomp_ack(stomp_session_t *s, size_t hdrc, const struct stomp_hdr *hdrs)
+int
+stomp_ack(stomp_session_t *s, size_t hdrc, const struct stomp_hdr *hdrs)
 {
 	switch(s->protocol) {
 		case SPL_12:
@@ -500,7 +435,7 @@ int stomp_ack(stomp_session_t *s, size_t hdrc, const struct stomp_hdr *hdrs)
 			}
 	}
 
-	
+
 	frame_reset(s->frame_out);
 
 	if (frame_cmd_set(s->frame_out, "ACK")) {
@@ -515,13 +450,14 @@ int stomp_ack(stomp_session_t *s, size_t hdrc, const struct stomp_hdr *hdrs)
 		s->run = 0;
 		return -1;
 	}
-	
+
 	CLOCK_GETTIME(&s->last_write);
 
 	return 0;
 }
 
-int stomp_nack(stomp_session_t *s, size_t hdrc, const struct stomp_hdr *hdrs)
+int
+stomp_nack(stomp_session_t *s, size_t hdrc, const struct stomp_hdr *hdrs)
 {
 	switch(s->protocol) {
 		case SPL_12:
@@ -550,7 +486,7 @@ int stomp_nack(stomp_session_t *s, size_t hdrc, const struct stomp_hdr *hdrs)
 	if (frame_cmd_set(s->frame_out, "NACK")) {
 		return -1;
 	}
-	
+
 	if (frame_hdrs_add(s->frame_out, hdrc, hdrs)) {
 		return -1;
 	}
@@ -559,13 +495,14 @@ int stomp_nack(stomp_session_t *s, size_t hdrc, const struct stomp_hdr *hdrs)
 		s->run = 0;
 		return -1;
 	}
-	
+
 	CLOCK_GETTIME(&s->last_write);
 
 	return 0;
 }
 
-int stomp_commit(stomp_session_t *s, size_t hdrc, const struct stomp_hdr *hdrs)
+int
+stomp_commit(stomp_session_t *s, size_t hdrc, const struct stomp_hdr *hdrs)
 {
 	if (!hdr_get(hdrc, hdrs, "transaction")) {
 		errno = EINVAL;
@@ -586,13 +523,15 @@ int stomp_commit(stomp_session_t *s, size_t hdrc, const struct stomp_hdr *hdrs)
 		s->run = 0;
 		return -1;
 	}
-	
+
 	CLOCK_GETTIME(&s->last_write);
 
 	return 0;
 }
 
-int stomp_send(stomp_session_t *s, size_t hdrc, const struct stomp_hdr *hdrs, void *body, size_t body_len)
+int
+stomp_send(stomp_session_t *s, size_t hdrc, const struct stomp_hdr *hdrs,
+    void *body, size_t body_len)
 {
 	char buf[MAXBUFLEN];
 	const char *len;
@@ -607,8 +546,8 @@ int stomp_send(stomp_session_t *s, size_t hdrc, const struct stomp_hdr *hdrs, vo
 	if (frame_cmd_set(s->frame_out, "SEND")) {
 		return -1;
 	}
-	
-	// frames SHOULD include a content-length
+
+	/* frames SHOULD include a content-length */
 	len = hdr_get(hdrc, hdrs, "content-length");
 	if (!len) {
 		snprintf(buf, MAXBUFLEN, "%lu", (unsigned long)body_len);
@@ -629,101 +568,14 @@ int stomp_send(stomp_session_t *s, size_t hdrc, const struct stomp_hdr *hdrs, vo
 		s->run = 0;
 		return -1;
 	}
-	
+
 	CLOCK_GETTIME(&s->last_write);
 
 	return 0;
 }
 
-static void on_connected(stomp_session_t *s) 
-{ 
-	struct stomp_ctx_connected e;
-	frame_t *f = s->frame_in;
-	unsigned long x, y;
-	const char *h;
-	size_t hdrc;
-	const struct stomp_hdr *hdrs;
-	enum stomp_prot v;
-
-	hdrc = frame_hdrs_get(f, &hdrs);
-	h = hdr_get(hdrc, hdrs, "version");
-	if (h && !parse_version(h, &v)) {
-		s->protocol = v;
-	}
-
-	h = hdr_get(hdrc, hdrs, "heart-beat");
-	if (h && !parse_heartbeat(h, &x, &y)) {
-		if (!s->client_hb || !y) {
-			s->client_hb = 0;
-		} else {
-			s->client_hb = s->client_hb > y ? s->client_hb : y;
-		}
-
-		if (!s->broker_hb || !x) {
-			s->broker_hb = 0;
-		} else {
-			s->broker_hb = s->broker_hb > x ? s->broker_hb : x;
-		}
-	} else {
-		s->client_hb = 0;
-		s->broker_hb = 0;
-	}
-
-	if (!s->callbacks.connected) {
-		return;
-	}
-
-	e.hdrc = hdrc;
-	e.hdrs = hdrs;
-
-	s->callbacks.connected(s, &e, s->ctx);
-}
-
-static void on_receipt(stomp_session_t *s) 
-{ 
-	struct stomp_ctx_receipt e;
-	frame_t *f = s->frame_in;
-
-	if (!s->callbacks.receipt) {
-		return;
-	}
-
-	e.hdrc = frame_hdrs_get(f, &e.hdrs);
-
-	s->callbacks.receipt(s, &e, s->ctx);
-}
-
-static void on_error(stomp_session_t *s) 
-{ 
-	struct stomp_ctx_error e;
-	frame_t *f = s->frame_in;
-
-	if (!s->callbacks.error) {
-		return;
-	}
-
-	e.hdrc = frame_hdrs_get(f, &e.hdrs);
-	e.body_len = frame_body_get(f, &e.body);
-
-	s->callbacks.error(s, &e, s->ctx);
-}
-
-static void on_message(stomp_session_t *s) 
-{ 
-	struct stomp_ctx_message e;
-	frame_t *f = s->frame_in;
-
-	if (!s->callbacks.message) {
-		return;
-	}
-	
-	e.hdrc = frame_hdrs_get(f, &e.hdrs);
-	e.body_len = frame_body_get(f, &e.body);
-
-	s->callbacks.message(s, &e, s->ctx);
-}
-
-int on_server_cmd(stomp_session_t *s, const unsigned char* buf, size_t len)
+int
+on_server_cmd(stomp_session_t *s, const unsigned char* buf, size_t len)
 {
 	int err;
 	const char *cmd;
@@ -756,7 +608,7 @@ int on_server_cmd(stomp_session_t *s, const unsigned char* buf, size_t len)
 	} else {
 		return -1;
 	}
-	
+
 	return 0;
 }
 
@@ -802,4 +654,181 @@ stomp_handle_heartbeat(stomp_session_t *s)
 	}
 
 	return (0);
+}
+
+static int
+parse_version(const char *s, enum stomp_prot *v)
+{
+	enum stomp_prot tmp_v;
+
+	if (!s) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	if (!strncmp(s, "1.2", 3)) {
+		tmp_v = SPL_12;
+	} else if (!strncmp(s, "1.1", 3)) {
+		tmp_v = SPL_11;
+	} else if (!strncmp(s, "1.0", 3)) {
+		tmp_v = SPL_10;
+	} else {
+		tmp_v = SPL_10;
+	}
+
+	*v = tmp_v;
+
+	return 0;
+}
+
+static int
+parse_heartbeat(const char *s, unsigned long *x, unsigned long *y)
+{
+	unsigned long tmp_x, tmp_y;
+	char *endptr;
+	const char *nptr = s;
+
+	if (!s) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	errno = 0;
+	tmp_x = strtoul(nptr, &endptr, 10);
+	if (errno != 0) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	if (tmp_x == ULONG_MAX) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	if (endptr == nptr) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	if (*endptr != ',') {
+		errno = EINVAL;
+		return -1;
+	}
+
+	nptr = endptr;
+	nptr++;
+
+	errno = 0;
+	tmp_y = strtoul(nptr, &endptr, 10);
+	if (errno !=0) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	if (tmp_y == ULONG_MAX) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	if (endptr == nptr) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	*x = tmp_x;
+	*y = tmp_y;
+
+	return 0;
+}
+
+static void
+on_connected(stomp_session_t *s)
+{
+	struct stomp_ctx_connected e;
+	frame_t *f = s->frame_in;
+	unsigned long x, y;
+	const char *h;
+	size_t hdrc;
+	const struct stomp_hdr *hdrs;
+	enum stomp_prot v;
+
+	hdrc = frame_hdrs_get(f, &hdrs);
+	h = hdr_get(hdrc, hdrs, "version");
+	if (h && !parse_version(h, &v)) {
+		s->protocol = v;
+	}
+
+	h = hdr_get(hdrc, hdrs, "heart-beat");
+	if (h && !parse_heartbeat(h, &x, &y)) {
+		if (!s->client_hb || !y) {
+			s->client_hb = 0;
+		} else {
+			s->client_hb = s->client_hb > y ? s->client_hb : y;
+		}
+
+		if (!s->broker_hb || !x) {
+			s->broker_hb = 0;
+		} else {
+			s->broker_hb = s->broker_hb > x ? s->broker_hb : x;
+		}
+	} else {
+		s->client_hb = 0;
+		s->broker_hb = 0;
+	}
+
+	if (!s->callbacks.connected) {
+		return;
+	}
+
+	e.hdrc = hdrc;
+	e.hdrs = hdrs;
+
+	s->callbacks.connected(s, &e, s->ctx);
+}
+
+static void
+on_receipt(stomp_session_t *s)
+{
+	struct stomp_ctx_receipt e;
+	frame_t *f = s->frame_in;
+
+	if (!s->callbacks.receipt) {
+		return;
+	}
+
+	e.hdrc = frame_hdrs_get(f, &e.hdrs);
+
+	s->callbacks.receipt(s, &e, s->ctx);
+}
+
+static void
+on_error(stomp_session_t *s)
+{
+	struct stomp_ctx_error e;
+	frame_t *f = s->frame_in;
+
+	if (!s->callbacks.error) {
+		return;
+	}
+
+	e.hdrc = frame_hdrs_get(f, &e.hdrs);
+	e.body_len = frame_body_get(f, &e.body);
+
+	s->callbacks.error(s, &e, s->ctx);
+}
+
+static void
+on_message(stomp_session_t *s)
+{
+	struct stomp_ctx_message e;
+	frame_t *f = s->frame_in;
+
+	if (!s->callbacks.message) {
+		return;
+	}
+
+	e.hdrc = frame_hdrs_get(f, &e.hdrs);
+	e.body_len = frame_body_get(f, &e.body);
+
+	s->callbacks.message(s, &e, s->ctx);
 }
