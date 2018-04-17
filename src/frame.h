@@ -1,6 +1,6 @@
 /*
  * Copyright 2013 Evgeni Dobrev <evgeni_dobrev@developer.bg>
- * Copyright (c) 2015, CUJO LLC.
+ * Copyright (c) 2015 - 2018, CUJO LLC.
  *
  * This library is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Lesser General Public License as published by
@@ -29,7 +29,7 @@ int frame_cmd_set(frame_t *f, const char *cmd);
 int frame_hdr_add(frame_t *f, const char *key, const char *val);
 int frame_hdrs_add(frame_t *f, size_t hdrc, const struct stomp_hdr *hdrs);
 int frame_body_set(frame_t *f, const void *body, size_t len);
-ssize_t frame_write(struct libwebsocket* fd, frame_t *f);
+ssize_t frame_write(struct lws* fd, frame_t *f);
 
 size_t frame_cmd_get(frame_t *f, const char **cmd);
 size_t frame_hdrs_get(frame_t *f, const struct stomp_hdr **hdrs);

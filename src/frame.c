@@ -1,6 +1,6 @@
 /*
  * Copyright 2013 Evgeni Dobrev <evgeni_dobrev@developer.bg>
- * Copyright (c) 2015, CUJO LLC.
+ * Copyright (c) 2015 - 2018, CUJO LLC.
  *
  * This library is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Lesser General Public License as published by
@@ -493,7 +493,7 @@ static enum read_state frame_read_body(frame_t *f, char c)
 } 
 
 
-ssize_t frame_write(struct libwebsocket* wsi, frame_t *f) 
+ssize_t frame_write(struct lws* wsi, frame_t *f) 
 {
 	size_t left; 
 	size_t n;
@@ -515,7 +515,7 @@ ssize_t frame_write(struct libwebsocket* wsi, frame_t *f)
 			
 	memcpy(ws_buf + LWS_SEND_BUFFER_PRE_PADDING, f->buf, left);
 
-	n = libwebsocket_write(wsi, &ws_buf[LWS_SEND_BUFFER_PRE_PADDING], left, LWS_WRITE_TEXT);
+	n = lws_write(wsi, &ws_buf[LWS_SEND_BUFFER_PRE_PADDING], left, LWS_WRITE_TEXT);
 
 	/* assert(n == left); */
 	/* printf("stomp (frame_write): %zu bytes written\n", n); */

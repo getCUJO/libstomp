@@ -1,6 +1,6 @@
 /*
  * Copyright 2013 Evgeni Dobrev <evgeni_dobrev@developer.bg>
- * Copyright (c) 2015, CUJO LLC.
+ * Copyright (c) 2015 - 2018, CUJO LLC.
  *
  * This library is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Lesser General Public License as published by
@@ -54,7 +54,7 @@ struct _stomp_session {
 	frame_t			*frame_out;	/* library -> broker */
 	frame_t			*frame_in;	/* broker -> library */
 	enum stomp_prot		 protocol;
-	struct libwebsocket	*broker_fd;	/* pointer to a WS instance */
+	struct lws	*broker_fd;	/* pointer to a WS instance */
 	int			 client_id;	/* unique ids for subscribe */
 	unsigned long		 client_hb;	/* client heartbeat [ms] */
 	unsigned long		 broker_hb;	/* broker heartbeat [ms] */
@@ -130,7 +130,7 @@ stomp_callback_set(stomp_session_t *s, enum stomp_cb_type type, stomp_cb_t cb)
 }
 
 int
-stomp_connect(stomp_session_t *s, struct libwebsocket* wsi, size_t hdrc,
+stomp_connect(stomp_session_t *s, struct lws* wsi, size_t hdrc,
     const struct stomp_hdr *hdrs)
 {
 
@@ -548,7 +548,7 @@ stomp_handle_heartbeat(stomp_session_t *s)
 				return (-1);
 			buf[LWS_SEND_BUFFER_PRE_PADDING] = '\n';
 			/* XXX assert inside a library? */
-			assert(libwebsocket_write(s->broker_fd,
+			assert(lws_write(s->broker_fd,
 			    &buf[LWS_SEND_BUFFER_PRE_PADDING], 1,
 			    LWS_WRITE_TEXT) != -1);
 			free(buf);

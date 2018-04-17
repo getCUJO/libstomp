@@ -1,6 +1,6 @@
 /*
  * Copyright 2013 Evgeni Dobrev <evgeni_dobrev@developer.bg>
- * Copyright (c) 2015, CUJO LLC.
+ * Copyright (c) 2015 - 2018, CUJO LLC.
  *
  * This library is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Lesser General Public License as published by
@@ -95,7 +95,7 @@ int stomp_send(stomp_session_t *, size_t, const struct stomp_hdr *, void *,
 
 int stomp_recv_cmd(stomp_session_t *, const unsigned char*, size_t);
 
-int stomp_connect(stomp_session_t *, struct libwebsocket *,size_t,
+int stomp_connect(stomp_session_t *, struct lws *,size_t,
     const struct stomp_hdr *);
 
 int stomp_handle_heartbeat(stomp_session_t *);
