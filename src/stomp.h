@@ -63,7 +63,6 @@ enum stomp_cb_type {
 	SCB_ERROR,
 	SCB_MESSAGE,
 	SCB_RECEIPT,
-	SCB_USER,
 };
 
 typedef void(*stomp_cb_t)(stomp_session_t *, void *, void *);
@@ -98,6 +97,8 @@ int stomp_recv_cmd(stomp_session_t *, const unsigned char*, size_t);
 int stomp_connect(stomp_session_t *, struct lws *,size_t,
     const struct stomp_hdr *);
 
-int stomp_handle_heartbeat(stomp_session_t *);
+int stomp_send_heartbeat(stomp_session_t *);
+int stomp_get_broker_hb(stomp_session_t *);
+int stomp_get_client_hb(stomp_session_t *);
 
 #endif /* STOMP_H */

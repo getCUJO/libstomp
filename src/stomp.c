@@ -37,15 +37,11 @@
 /* enough space for ULLONG_MAX as string */
 #define ULL_STR_LEN 25
 
-/* max number of broker heartbeat timeouts */
-#define MAX_BROKER_TIMEOUTS 5
-
 struct stomp_callbacks {
 	void (*connected)(stomp_session_t *, void *, void *);
 	void (*message)(stomp_session_t *, void *, void *);
 	void (*error)(stomp_session_t *, void *, void *);
 	void (*receipt)(stomp_session_t *, void *, void *);
-	void (*user)(stomp_session_t *, void *, void *);
 };
 
 struct _stomp_session {
@@ -60,7 +56,6 @@ struct _stomp_session {
 	unsigned long		 broker_hb;	/* broker heartbeat [ms] */
 	struct timespec		 last_write;
 	struct timespec		 last_read;
-	int			 broker_timeouts;
 	int			 run;
 };
 
@@ -120,9 +115,6 @@ stomp_callback_set(stomp_session_t *s, enum stomp_cb_type type, stomp_cb_t cb)
 		break;
 	case SCB_RECEIPT:
 		s->callbacks.receipt = cb;
-		break;
-	case SCB_USER:
-		s->callbacks.user = cb;
 		break;
 	default:
 		return;
@@ -494,7 +486,6 @@ stomp_recv_cmd(stomp_session_t *s, const unsigned char* buf, size_t len)
 		return (-1);
 
 	clock_gettime(CLOCK_MONOTONIC, &s->last_read);
-	s->broker_timeouts = 0;
 
 	/* heart-beat */
 	if ((cmd_len = frame_cmd_get(f, &cmd)) == 0)
@@ -515,47 +506,29 @@ stomp_recv_cmd(stomp_session_t *s, const unsigned char* buf, size_t len)
 }
 
 int
-stomp_handle_heartbeat(stomp_session_t *s)
+stomp_get_broker_hb(stomp_session_t *s)
 {
-	struct timespec	 now;
-	unsigned long	 elapsed;
-	unsigned char	*buf;
+	return s->broker_hb;
+}
 
-	if (s->callbacks.user != NULL)
-		s->callbacks.user(s, NULL, s->ctx);
+int
+stomp_get_client_hb(stomp_session_t *s)
+{
+	return s->client_hb;
+}
 
-	if (s->client_hb != 0 || s->broker_hb != 0)
-		clock_gettime(CLOCK_MONOTONIC, &now);
+int
+stomp_send_heartbeat(stomp_session_t *s)
+{
+	unsigned char *buf = calloc(1, LWS_SEND_BUFFER_PRE_PADDING + 1 + LWS_SEND_BUFFER_POST_PADDING + 1);
 
-	if (s->broker_hb != 0) {
-		elapsed = (now.tv_sec - s->last_read.tv_sec) * 1000 +
-		    (now.tv_nsec - s->last_read.tv_nsec) / 1000000;
-		if (elapsed > s->broker_hb) {
-			memcpy(&s->last_read, &now, sizeof(s->last_read));
-			s->broker_timeouts++;
-		}
-		/* XXX assert inside a library? */
-		assert(s->broker_timeouts <= MAX_BROKER_TIMEOUTS);
-	}
+	if (buf == NULL)
+		return (-1);
 
-	if (s->client_hb != 0) {
-		elapsed = (now.tv_sec - s->last_write.tv_sec) * 1000 + \
-		    (now.tv_nsec - s->last_write.tv_nsec) / 1000000;
-		if (elapsed > s->client_hb) {
-			memcpy(&s->last_write, &now, sizeof(s->last_write));
-			if ((buf = calloc(1, LWS_SEND_BUFFER_PRE_PADDING + 1 +
-			    LWS_SEND_BUFFER_POST_PADDING + 1)) == NULL)
-				return (-1);
-			buf[LWS_SEND_BUFFER_PRE_PADDING] = '\n';
-			/* XXX assert inside a library? */
-			assert(lws_write(s->broker_fd,
-			    &buf[LWS_SEND_BUFFER_PRE_PADDING], 1,
-			    LWS_WRITE_TEXT) != -1);
-			free(buf);
-		}
-	}
-
-	return (0);
+	buf[LWS_SEND_BUFFER_PRE_PADDING] = '\n';
+	int bytes_sent = lws_write(s->broker_fd, &buf[LWS_SEND_BUFFER_PRE_PADDING], 1, LWS_WRITE_TEXT);
+	free(buf);
+	return (bytes_sent == -1 ? -1 : 0);
 }
 
 static int
