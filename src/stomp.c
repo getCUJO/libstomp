@@ -435,7 +435,7 @@ stomp_commit(stomp_session_t *s, size_t hdrc, const struct stomp_hdr *hdrs)
 
 int
 stomp_send(stomp_session_t *s, size_t hdrc, const struct stomp_hdr *hdrs,
-    void *body, size_t body_len)
+    const void *body, size_t body_len)
 {
 	char		 buf[ULL_STR_LEN];
 	const char	*len;
