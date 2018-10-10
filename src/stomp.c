@@ -218,7 +218,7 @@ stomp_subscribe(stomp_session_t *s, size_t hdrc, const struct stomp_hdr *hdrs)
 			return (-1);
 	}
 
-	if (ack == NULL && frame_hdr_add(s->frame_out, "ack", "auto") ||
+	if ((ack == NULL && frame_hdr_add(s->frame_out, "ack", "auto")) ||
 	    frame_hdrs_add(s->frame_out, hdrc, hdrs))
 		return (-1);
 
@@ -482,7 +482,7 @@ stomp_recv_cmd(stomp_session_t *s, const unsigned char* buf, size_t len)
 
 	frame_reset(f);
 
-	if (err = frame_read(buf, len, f))
+	if ((err = frame_read(buf, len, f)))
 		return (-1);
 
 	clock_gettime(CLOCK_MONOTONIC, &s->last_read);
